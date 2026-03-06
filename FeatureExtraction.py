@@ -29,74 +29,50 @@ class FeatureExtractionStrategy:
 # 2. Helper
 # =========================
 
-class NLTKTextTokenizer:
-    def __init__(self):
-        nltk.download("punkt", quiet=True)
-        try:
-            nltk.download("punkt_tab", quiet=True)
-        except Exception:
-            pass
-
-    def tokenize(self, text: str) -> List[str]:
-        if pd.isna(text):
-            return []
-        return word_tokenize(str(text).lower())
-
+def identity_tokenizer(text):
+    return text
 
 # =========================
 # 3. Feature Extractors
 # =========================
 
-class BagOfWordsExtractor(FeatureExtractionStrategy):
+# 1. Create a Base class for Scikit-Learn vectorizers
+class BaseSklearnExtractor(FeatureExtractionStrategy):
+    # This assumes self.vectorizer is defined in the child class
+
+    def fit_transform(self, train_tokens: List[List[str]]) -> np.ndarray:
+        return self.vectorizer.fit_transform(train_tokens).toarray()
+
+    def transform(self, test_tokens: List[List[str]]) -> np.ndarray:
+        return self.vectorizer.transform(test_tokens).toarray()
+
+    def get_feature_names(self) -> List[str]:
+        return [name for name in self.vectorizer.get_feature_names_out()]
+
+
+# 2. Inherit from the Base class and only write the setup logic
+class BagOfWordsExtractor(BaseSklearnExtractor):
     def __init__(self, max_features: int = 5000):
-        self.tokenizer = NLTKTextTokenizer()
         self.vectorizer = CountVectorizer(
-            tokenizer=self.tokenizer.tokenize,
-            lowercase=False,
+            tokenizer=identity_tokenizer,
+            preprocessor=identity_tokenizer,
             token_pattern=None,
             max_features=max_features
         )
 
-    def fit_transform(self, train_texts: List[str]) -> np.ndarray:
-        return self.vectorizer.fit_transform(train_texts).toarray()
 
-    def transform(self, test_texts: List[str]) -> np.ndarray:
-        return self.vectorizer.transform(test_texts).toarray()
-
-    def get_feature_names(self) -> List[str]:
-        return [name for name in self.vectorizer.get_feature_names_out()]
-
-
-class TfidfExtractor(FeatureExtractionStrategy):
+class TfidfExtractor(BaseSklearnExtractor):
     def __init__(self, max_features: int = 5000):
-        self.tokenizer = NLTKTextTokenizer()
         self.vectorizer = TfidfVectorizer(
-            tokenizer=self.tokenizer.tokenize,
-            lowercase=False,
+            tokenizer=identity_tokenizer,
+            preprocessor=identity_tokenizer,
             token_pattern=None,
             max_features=max_features
         )
-
-    def fit_transform(self, train_texts: List[str]) -> np.ndarray:
-        return self.vectorizer.fit_transform(train_texts).toarray()
-
-    def transform(self, test_texts: List[str]) -> np.ndarray:
-        return self.vectorizer.transform(test_texts).toarray()
-
-    def get_feature_names(self) -> List[str]:
-        return [name for name in self.vectorizer.get_feature_names_out()]
 
 
 class Word2VecExtractor(FeatureExtractionStrategy):
-    def __init__(
-        self,
-        vector_size: int = 100,
-        window: int = 5,
-        min_count: int = 1,
-        workers: int = 4,
-        sg: int = 0
-    ):
-        self.tokenizer = NLTKTextTokenizer()
+    def __init__(self, vector_size: int = 100, window: int = 5, min_count: int = 1, workers: int = 4, sg: int = 0):
         self.vector_size = vector_size
         self.window = window
         self.min_count = min_count
@@ -104,37 +80,31 @@ class Word2VecExtractor(FeatureExtractionStrategy):
         self.sg = sg
         self.model = None
 
-    def _tokenize_corpus(self, texts: List[str]) -> List[List[str]]:
-        return [self.tokenizer.tokenize(text) for text in texts]
-
     def _document_vector(self, tokens: List[str]) -> np.ndarray:
+        # Averages the word vectors to create a single vector for the entire comment
         valid_tokens = [token for token in tokens if token in self.model.wv]
-
         if not valid_tokens:
             return np.zeros(self.vector_size)
-
         return np.mean([self.model.wv[token] for token in valid_tokens], axis=0)
 
-    def fit_transform(self, train_texts: List[str]) -> np.ndarray:
-        tokenized_train = self._tokenize_corpus(train_texts)
-
+    def fit_transform(self, train_tokens: List[List[str]]) -> np.ndarray:
+        # Trains the Gensim model directly on your lists of words
         self.model = Word2Vec(
-            sentences=tokenized_train,
+            sentences=train_tokens,
             vector_size=self.vector_size,
             window=self.window,
             min_count=self.min_count,
             workers=self.workers,
             sg=self.sg
         )
+        return np.array([self._document_vector(tokens) for tokens in train_tokens])
 
-        return np.array([self._document_vector(tokens) for tokens in tokenized_train])
-
-    def transform(self, test_texts: List[str]) -> np.ndarray:
-        tokenized_test = self._tokenize_corpus(test_texts)
-        return np.array([self._document_vector(tokens) for tokens in tokenized_test])
+    def transform(self, test_tokens: List[List[str]]) -> np.ndarray:
+        return np.array([self._document_vector(tokens) for tokens in test_tokens])
 
     def get_feature_names(self) -> List[str]:
-        return [i for i in range(self.vector_size)]
+        # Word2Vec features don't have human-readable names, just indices 0 to vector_size
+        return [str(i) for i in range(self.vector_size)]
 
 
 # =========================
