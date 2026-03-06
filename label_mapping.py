@@ -66,11 +66,11 @@ class LabelMapper:
 
     def run(
         self,
-        train_input_path="/data/train.csv",
-        train_output_path="/data/train_binary_labels.csv",
-        test_input_path="/data/test.csv",
-        test_labels_input_path="/data/test_labels.csv",
-        test_output_path="/data/test_binary_labels.csv",
+        train_input_path="data/train.csv",
+        train_output_path="data/train_binary_labels.csv",
+        test_input_path="data/test.csv",
+        test_labels_input_path="data/test_labels.csv",
+        test_output_path="data/test_binary_labels.csv",
     ):
         self.create_train_binary_labels(
             input_path=train_input_path,
