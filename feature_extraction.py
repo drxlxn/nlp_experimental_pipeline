@@ -64,7 +64,7 @@ class BagOfWordsExtractor(FeatureExtractionStrategy):
         return self.vectorizer.transform(test_texts).toarray()
 
     def get_feature_names(self) -> List[str]:
-        return [f"feature_{name}" for name in self.vectorizer.get_feature_names_out()]
+        return [name for name in self.vectorizer.get_feature_names_out()]
 
 
 class TfidfExtractor(FeatureExtractionStrategy):
@@ -84,7 +84,7 @@ class TfidfExtractor(FeatureExtractionStrategy):
         return self.vectorizer.transform(test_texts).toarray()
 
     def get_feature_names(self) -> List[str]:
-        return [f"feature_{name}" for name in self.vectorizer.get_feature_names_out()]
+        return [name for name in self.vectorizer.get_feature_names_out()]
 
 
 class Word2VecExtractor(FeatureExtractionStrategy):
