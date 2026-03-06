@@ -5,7 +5,7 @@ import spacy
 from nltk.corpus import stopwords
 from spacy.lang.en.stop_words import STOP_WORDS
 from nltk.stem import PorterStemmer, SnowballStemmer
-
+import numpy as np
 #
 # 1. The Blueprints (Strategy Interface)
 #
@@ -157,17 +157,27 @@ class DataPreprocessor:
 
         return unique_texts, unique_labels
 
-    def detect_outliers(self, texts: List[str], labels: List[int], min_words: int = 2, max_words: int = 150):
-        """Removes texts that are unusually short or unusually long."""
-        print(f"Removing outliers (keeping texts between {min_words} and {max_words} words)...")
+    def detect_outliers(self, texts: List[str], labels: List[int], lower_percentile: float = 1.0,
+                        upper_percentile: float = 95.0):
+        """Removes outlier texts based on word count percentiles."""
+        print(
+            f"Removing outliers (keeping texts between the {lower_percentile}th and {upper_percentile}th percentiles)...")
+
+        # 1. Calculate the length of every single comment
+        word_counts = [len(text.split()) for text in texts]
+
+        # 2. Let numpy calculate the exact word count for those percentiles!
+        min_words = np.percentile(word_counts, lower_percentile)
+        max_words = np.percentile(word_counts, upper_percentile)
+
+        print(f"  -> Calculated thresholds: Min {int(min_words)} words, Max {int(max_words)} words.")
+
         filtered_texts = []
         filtered_labels = []
 
-        for text, label in zip(texts, labels):
-            # A very fast, crude split just to get a rough word count
-            word_count = len(text.split())
-
-            if min_words <= word_count <= max_words:
+        # 3. Filter the dataset using those smart thresholds
+        for text, label, count in zip(texts, labels, word_counts):
+            if min_words <= count <= max_words:
                 filtered_texts.append(text)
                 filtered_labels.append(label)
 
@@ -253,6 +263,10 @@ def interactive_menu():
     )
 
     return preprocessor
+
+
+
+
 
 
 if __name__ == "__main__":
