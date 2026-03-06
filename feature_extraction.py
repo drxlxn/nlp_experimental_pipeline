@@ -134,7 +134,7 @@ class Word2VecExtractor(FeatureExtractionStrategy):
         return np.array([self._document_vector(tokens) for tokens in tokenized_test])
 
     def get_feature_names(self) -> List[str]:
-        return [f"feature_w2v_{i}" for i in range(self.vector_size)]
+        return [i for i in range(self.vector_size)]
 
 
 # =========================
