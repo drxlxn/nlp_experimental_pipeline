@@ -134,39 +134,35 @@ class DataPreprocessor:
         self.stop_word_remover = stopwordremover
         self.stemmer = stemmer
 
-    def remove_duplicates(self, texts: List[str], labels: List[int]):
-        #Removes duplicate texts while keeping the labels perfectly aligned.
+    def remove_duplicates(self, texts: List[str], labels: List[int], ids: List[str]):
+        """Removes duplicate texts while keeping the labels and IDs perfectly aligned."""
         print("Removing duplicates...")
         seen_texts = set()
         unique_texts = []
         unique_labels = []
+        unique_ids = []
 
-        # zip() lets us loop through both lists at the exact same time
-        for text, label in zip(texts, labels):
-            # We lowercase the text just for the duplicate check so "Hello" and "hello"
-            # are treated as duplicates, but we keep the original text format.
+        for text, label, item_id in zip(texts, labels, ids):
             text_lower = text.lower()
 
             if text_lower not in seen_texts:
                 seen_texts.add(text_lower)
                 unique_texts.append(text)
                 unique_labels.append(label)
+                unique_ids.append(item_id)
 
         duplicates_removed = len(texts) - len(unique_texts)
         print(f"  -> Removed {duplicates_removed} duplicate entries.")
 
-        return unique_texts, unique_labels
+        return unique_texts, unique_labels, unique_ids
 
-    def detect_outliers(self, texts: List[str], labels: List[int], lower_percentile: float = 1.0,
+    def detect_outliers(self, texts: List[str], labels: List[int], ids: List[str], lower_percentile: float = 1.0,
                         upper_percentile: float = 95.0):
-        """Removes outlier texts based on word count percentiles."""
+        """Removes outlier texts based on word count percentiles while keeping labels and IDs aligned."""
         print(
             f"Removing outliers (keeping texts between the {lower_percentile}th and {upper_percentile}th percentiles)...")
 
-        # 1. Calculate the length of every single comment
         word_counts = [len(text.split()) for text in texts]
-
-        # 2. Let numpy calculate the exact word count for those percentiles!
         min_words = np.percentile(word_counts, lower_percentile)
         max_words = np.percentile(word_counts, upper_percentile)
 
@@ -174,17 +170,18 @@ class DataPreprocessor:
 
         filtered_texts = []
         filtered_labels = []
+        filtered_ids = []
 
-        # 3. Filter the dataset using those smart thresholds
-        for text, label, count in zip(texts, labels, word_counts):
+        for text, label, item_id, count in zip(texts, labels, ids, word_counts):
             if min_words <= count <= max_words:
                 filtered_texts.append(text)
                 filtered_labels.append(label)
+                filtered_ids.append(item_id)
 
         outliers_removed = len(texts) - len(filtered_texts)
         print(f"  -> Removed {outliers_removed} outlier entries.")
 
-        return filtered_texts, filtered_labels
+        return filtered_texts, filtered_labels, filtered_ids
 
     def process_dataset(self, texts: List[str]) -> List[List[str]]:
         # 1. Tokenize
