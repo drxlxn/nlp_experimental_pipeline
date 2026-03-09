@@ -3,6 +3,8 @@ import json
 import pandas as pd
 from datetime import datetime
 
+from sklearn.model_selection import train_test_split
+
 from LabelMapping import LabelMapper
 from DataPreprocessing import (
     DataPreprocessor, NLTKTokenizer, SpacyTokenizer,
@@ -12,6 +14,9 @@ from DataPreprocessing import (
 from FeatureExtraction import (
     BagOfWordsExtractor, TfidfExtractor, Word2VecExtractor
 )
+from ModelTraining import (
+    LogisticRegressionModel, SVMModel, PyTorchDNNModel, ModelTrainer
+)
 
 
 class ExperimentRunner:
@@ -19,13 +24,19 @@ class ExperimentRunner:
         self.config = {
             "experiment_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
             "preprocessing": {},
-            "feature_extraction": {}
+            "feature_extraction": {},
+            "model": {}
         }
         self.data_dir = "data"
         self.models_dir = "models"
 
         self.preprocessor = None
         self.extractor = None
+
+        # Model Tracking
+        self.model_strategy = None
+        self.do_tune = False
+        self.do_plot = False
 
         self.train_path = None
         self.test_path = None
@@ -111,8 +122,33 @@ class ExperimentRunner:
             self.config["feature_extraction"] = {"method": "TF-IDF", "max_features": feat_val}
             self.extractor = TfidfExtractor(max_features=feat_val)
 
+    def ui_build_model(self):
+        print("\n--- [STEP 4] Model Selection ---")
+        print("1: Logistic Regression")
+        print("2: Support Vector Machine (Linear)")
+        print("3: Deep Neural Network (PyTorch)")
+        choice = input("Choice [1]: ").strip()
+
+        if choice == "3":
+            dev = input("Device (auto, cpu, gpu) [auto]: ").strip() or "auto"
+            self.model_strategy = PyTorchDNNModel(device_preference=dev)
+            self.config["model"] = {"type": "PyTorchDNN", "device": dev}
+        elif choice == "2":
+            self.model_strategy = SVMModel()
+            self.config["model"] = {"type": "SVM"}
+        else:
+            self.model_strategy = LogisticRegressionModel()
+            self.config["model"] = {"type": "LogisticRegression"}
+
+        tune = input("Tune hyperparameters? (y/n) [n]: ").strip().lower()
+        self.do_tune = (tune == 'y')
+        self.config["model"]["tuned"] = self.do_tune
+
+        plot = input("Generate learning curve plot? (y/n) [n]: ").strip().lower()
+        self.do_plot = (plot == 'y')
+
     def execute_pipeline(self):
-        print("\n--- [STEP 4] Execution ---")
+        print("\n--- [STEP 5] Data Pipeline Execution ---")
         train_df = pd.read_csv(self.train_path)
         test_df = pd.read_csv(self.test_path)
 
@@ -136,9 +172,8 @@ class ExperimentRunner:
             train_texts, train_labels, train_ids, lower_percentile=1.0, upper_percentile=99.0
         )
 
-        # Guard against empty datasets after filtering
         if not train_texts:
-            raise ValueError("All training data was filtered out during preprocessing. Check your outlier percentiles.")
+            raise ValueError("All training data was filtered out during preprocessing.")
 
         print("Processing text...")
         train_tokens = self.preprocessor.process_dataset(train_texts)
@@ -148,15 +183,17 @@ class ExperimentRunner:
         train_feats = self.extractor.fit_transform(train_tokens)
         test_feats = self.extractor.transform(test_tokens)
 
-        print("\n--- [STEP 5] Saving Features & Config ---")
-        names = self.extractor.get_feature_names()
+        print("\n--- [STEP 6] Saving Features ---")
+        names = [f"feat_{name}" for name in self.extractor.get_feature_names()]
+        exp_id = self.config['experiment_id']
 
-        # Reconstruct without the 'comment_text' string column
+        # 1. Build the Training DataFrame
         train_final = pd.concat([
             pd.DataFrame({"id": train_ids, "binary_label": train_labels}),
             pd.DataFrame(train_feats, columns=names)
         ], axis=1)
 
+        # 2. Build the Testing DataFrame
         test_out_dict = {"id": test_ids}
         if has_test_labels:
             test_out_dict["binary_label"] = test_labels
@@ -166,16 +203,45 @@ class ExperimentRunner:
             pd.DataFrame(test_feats, columns=names)
         ], axis=1)
 
-        exp_id = self.config['experiment_id']
+        # 3. Save both as Parquet files
+        train_out_path = os.path.join(self.data_dir, f"train_features_{exp_id}.parquet")
+        test_out_path = os.path.join(self.data_dir, f"test_features_{exp_id}.parquet")
 
-        train_out_path = os.path.join(self.data_dir, f"train_features_{exp_id}.csv")
-        test_out_path = os.path.join(self.data_dir, f"test_features_{exp_id}.csv")
+        train_final.to_parquet(train_out_path, engine='pyarrow')
+        test_final.to_parquet(test_out_path, engine='pyarrow')
 
-        train_final.to_csv(train_out_path, index=False)
-        test_final.to_csv(test_out_path, index=False)
+        print(f"Features saved with ID: {exp_id}")
+
+        print("\n--- [STEP 7] Model Training & Evaluation ---")
+        # Split 80/20 for local evaluation to ensure we get an accurate F1 score
+        print("Splitting training data for validation (80/20 split)...")
+        X_train, X_val, y_train, y_val = train_test_split(
+            train_feats, train_labels, test_size=0.2, random_state=42
+        )
+
+        trainer = ModelTrainer(self.model_strategy)
+        plot_dir = self.models_dir if self.do_plot else None
+
+        # Determine correct file extension for saving
+        ext = ".pth" if isinstance(self.model_strategy, PyTorchDNNModel) else ".pkl"
+        model_save_path = os.path.join(self.models_dir, f"model_{exp_id}{ext}")
+
+        metrics, best_params = trainer.run_training(
+            X_train=X_train, y_train=y_train,
+            X_test=X_val, y_test=y_val,
+            do_tune=self.do_tune,
+            model_save_path=model_save_path,
+            plot_dir=plot_dir,
+            experiment_name=f"Exp_{exp_id}"
+        )
+
+        # Log results to config
+        self.config["results"] = metrics
+        if best_params:
+            self.config["model"]["best_params"] = best_params
 
         self.save_experiment()
-        print(f"Process complete. Features saved with ID: {exp_id}")
+        print("\nPipeline execution fully complete!")
 
     def save_experiment(self):
         config_path = os.path.join(self.models_dir, f"config_{self.config['experiment_id']}.json")
@@ -189,6 +255,7 @@ class ExperimentRunner:
         self.ui_data_preparation()
         self.ui_build_preprocessor()
         self.ui_build_extractor()
+        self.ui_build_model()
         self.execute_pipeline()
 
 
